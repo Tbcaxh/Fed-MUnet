@@ -7,6 +7,7 @@ import numpy as np
 from collections import OrderedDict
 
 def create_logger(out_dir, logfile):
+    os.makedirs(out_dir, exist_ok=True)
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     logfile = os.path.join(out_dir, logfile[:-4]+'@'+time.strftime('(%m-%d)-%H-%M-%S')+'.log')
@@ -43,6 +44,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 def save_checkpoint(states, is_best, output_dir, filename='checkpoint.pth'):
+    os.makedirs(output_dir, exist_ok=True)
     torch.save(states, os.path.join(output_dir, filename))
     if is_best and 'state_dict' in states:
         torch.save(states['state_dict'], os.path.join(output_dir, 'model_best.pth'))

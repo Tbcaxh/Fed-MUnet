@@ -1,12 +1,21 @@
 {
 
-	"no_models" : 4,
+	"no_models" : 6,
 
 	"global_epochs" : 50,
 
 	"local_epochs" : 3,
 
-	"k" : 2,
+	"k" : 6,
+
+	"method" : "EpisodicCFS",
+
+
+	"unseen_client" : null,
+
+	"cfs_weight" : 1.0,
+
+	"FlatClip" : true,
 
 	"lambda" : 1,
 	
@@ -18,4 +27,3 @@
 	
 	"W" : 1
 }
-

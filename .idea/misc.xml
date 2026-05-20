@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Med-MFL" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Med-MFL" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote 3.10 (sftp://chenchen@192.10.84.119:9222/home/swap/chenchen/envs/Fed-MUnet/bin/python)" project-jdk-type="Python SDK" />
 </project>

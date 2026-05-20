@@ -5,6 +5,18 @@ import torch.nn as nn
 from medpy.metric.binary import dc
 from model.utils.utils import AverageMeter
 import random
+from utils.dataloader import crop_or_pad_2d
+
+def dice_binary(pred, target):
+    pred = pred.astype(bool)
+    target = target.astype(bool)
+    pred_sum = np.count_nonzero(pred)
+    target_sum = np.count_nonzero(target)
+    if pred_sum == 0 and target_sum == 0:
+        return 1.0
+    if pred_sum == 0 or target_sum == 0:
+        return 0.0
+    return 2.0 * np.count_nonzero(pred & target) / float(pred_sum + target_sum)
 
 @torch.no_grad()
 def inference(model, logger, config, dataset, device):
@@ -15,18 +27,25 @@ def inference(model, logger, config, dataset, device):
     with open(os.path.join(config.SPLIT.ROOT, 'split_data.pkl'), 'rb') as f:
         splits = pickle.load(f)
 
-    valids = random.sample(splits[dataset], 50)
+    valids = splits[dataset]
+    eval_clients = set(getattr(config, 'EVAL_CLIENTS', []))
+    if eval_clients:
+        valids = [item for item in valids if isinstance(item, dict) and item['client'] in eval_clients]
+    valids = random.sample(valids, min(50, len(valids)))
+    logger.info('evaluating split %s clients %s cases %d', dataset, sorted(eval_clients) if eval_clients else 'all', len(valids))
 
-    for name in valids:
-        data = np.load(os.path.join(config.DATASET.ROOT, name+'.npy'))
-        # pad slice
-        shape = np.array(data.shape[2:])
-        pad_length = config.TRAIN.PATCH_SIZE - shape
-        pad_left = pad_length // 2
-        pad_right = pad_length - pad_length // 2
-        pad_left = np.clip(pad_left, 0, pad_length)
-        pad_right = np.clip(pad_right, 0, pad_length)
-        data = np.pad(data, ((0, 0), (0, 0), (pad_left[0], pad_right[0]), (pad_left[1], pad_right[1])))
+    for item in valids:
+        if isinstance(item, dict):
+            data_path = os.path.join(config.DATASET.ROOT, item['client'], item['case'] + '.npy')
+        else:
+            data_path = os.path.join(config.DATASET.ROOT, item + '.npy')
+        data = np.load(data_path)
+        slices = []
+        for slice_idx in range(data.shape[1]):
+            slice_data = data[:, slice_idx]
+            center = np.array(slice_data.shape[1:]) // 2
+            slices.append(crop_or_pad_2d(slice_data, config.TRAIN.PATCH_SIZE, center=center))
+        data = np.stack(slices, axis=1)
         # run inference
         image = torch.from_numpy(data[:-1]).permute(1, 0, 2, 3).to(device)
         label = data[-1]
@@ -35,14 +54,11 @@ def inference(model, logger, config, dataset, device):
         out_list = nonline(out_list)
         pred = torch.argmax(out_list, dim=1).cpu().numpy()
         # quantitative analysis
-        perfs['WT'].update(dc(pred > 0, label > 0))
-        if 3 in label:
-            perfs['ET'].update(dc(pred == 3, label == 3))
-        if 2 in label:
-            perfs['TC'].update(dc(pred >= 2, label >= 2))
+        perfs['WT'].update(dice_binary(pred > 0, label > 0))
+        perfs['ET'].update(dice_binary(pred == 3, label == 3))
+        perfs['TC'].update(dice_binary(pred >= 2, label >= 2))
     for c in perfs.keys():
         logger.info(f'class {c} dice mean: {perfs[c].avg}')
     logger.info('------------ ----------- ------------')
     perf = np.mean([perfs[c].avg for c in perfs.keys()])
     return perf
-

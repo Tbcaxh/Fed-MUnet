@@ -36,7 +36,7 @@ class DownsampleSegTransform(AbstractTransform):
 def get_train_generator(trainloader, scales, num_workers):
     transforms = []
     transforms.extend([DownsampleSegTransform(scales=scales, label_key='label')])
-    transforms.extend([NumpyToTensor(keys=['data', 'label'], cast_to='float')])
+    transforms.extend([NumpyToTensor(keys=['data', 'cfs_data', 'label'], cast_to='float')])
 
     transforms = Compose(transforms)
     batch_generator_list = []
@@ -50,4 +50,3 @@ def get_train_generator(trainloader, scales, num_workers):
     )
         batch_generator_list.append(batch_generator)
     return batch_generator_list
-

@@ -9,8 +9,21 @@ from medpy.metric.binary import *
 from model.utils.function import inference
 import torch.backends.cudnn as cudnn
 from model.utils.utils import create_logger, setup_seed
+from utils.dataloader import crop_or_pad_2d
 
 device = torch.device('cuda' if (torch.cuda.is_available()) else 'cpu')
+
+def dice_binary(pred, target):
+    pred = pred.astype(bool)
+    target = target.astype(bool)
+    pred_sum = np.count_nonzero(pred)
+    target_sum = np.count_nonzero(target)
+    if pred_sum == 0 and target_sum == 0:
+        return 1.0
+    if pred_sum == 0 or target_sum == 0:
+        return 0.0
+    return 2.0 * np.count_nonzero(pred & target) / float(pred_sum + target_sum)
+
 @torch.no_grad()
 def inference(model, logger, config, dataset, metrics):
     model.eval().to(device)
@@ -24,16 +37,21 @@ def inference(model, logger, config, dataset, metrics):
         splits = pickle.load(f)
 
     valids = splits[dataset]
-    for name in valids:
-        data = np.load(os.path.join(config.DATASET_eva.ROOT, name+'.npy'))
-
-        shape = np.array(data.shape[2:])
-        pad_length = config.TRAIN.PATCH_SIZE - shape
-        pad_left = pad_length // 2
-        pad_right = pad_length - pad_length // 2
-        pad_left = np.clip(pad_left, 0, pad_length)
-        pad_right = np.clip(pad_right, 0, pad_length)
-        data = np.pad(data, ((0, 0), (0, 0), (pad_left[0], pad_right[0]), (pad_left[1], pad_right[1])))
+    eval_clients = set(getattr(config, 'EVAL_CLIENTS', []))
+    if eval_clients:
+        valids = [item for item in valids if isinstance(item, dict) and item['client'] in eval_clients]
+    for item in valids:
+        if isinstance(item, dict):
+            data_path = os.path.join(config.DATASET_eva.ROOT, item['client'], item['case'] + '.npy')
+        else:
+            data_path = os.path.join(config.DATASET_eva.ROOT, item + '.npy')
+        data = np.load(data_path)
+        slices = []
+        for slice_idx in range(data.shape[1]):
+            slice_data = data[:, slice_idx]
+            center = np.array(slice_data.shape[1:]) // 2
+            slices.append(crop_or_pad_2d(slice_data, config.TRAIN.PATCH_SIZE, center=center))
+        data = np.stack(slices, axis=1)
 
         image = torch.from_numpy(data[:-1]).permute(1, 0, 2, 3).to(device)
         label = data[-1]
@@ -48,14 +66,17 @@ def inference(model, logger, config, dataset, metrics):
         for metric in metrics:
             predi = pred if metric.__name__ == 'hd95' else pred[mask]
             labeli = label if metric.__name__ == 'hd95' else label[mask]
-            perfs[metric.__name__]['WT'].append(metric(predi > 0, labeli > 0))
-
-            if 3 in label:
-                y_true_class3 = (labeli == 3).astype(int)
-                y_pred_class3 = (predi == 3).astype(int)
-                perfs[metric.__name__]['ET'].append(metric((predi == 3).astype(int), (labeli == 3).astype(int)))
-            if 2 in label:
-                perfs[metric.__name__]['TC'].append(metric(predi >= 2, labeli >= 2))
+            if metric.__name__ == 'dc':
+                perfs[metric.__name__]['WT'].append(dice_binary(predi > 0, labeli > 0))
+                perfs[metric.__name__]['ET'].append(dice_binary(predi == 3, labeli == 3))
+                perfs[metric.__name__]['TC'].append(dice_binary(predi >= 2, labeli >= 2))
+            else:
+                if np.any(labeli > 0) and np.any(predi > 0):
+                    perfs[metric.__name__]['WT'].append(metric(predi > 0, labeli > 0))
+                if np.any(labeli == 3) and np.any(predi == 3):
+                    perfs[metric.__name__]['ET'].append(metric(predi == 3, labeli == 3))
+                if np.any(labeli >= 2) and np.any(predi >= 2):
+                    perfs[metric.__name__]['TC'].append(metric(predi >= 2, labeli >= 2))
     for metric in perfs.keys():
         et = perfs[metric]['ET']
         tc = perfs[metric]['TC']

@@ -32,7 +32,8 @@ class Server(object):
 
     def model_eval(self):
 
-        perf = inference(self.global_model, self.logger, config, self.device, dataset='val')
+        eval_split = self.conf.get('eval_split', 'val')
+        perf = inference(self.global_model, self.logger, config, eval_split, self.device)
         if perf > self.best_perf:
             self.best_perf = perf
             self.best_model = True
@@ -44,4 +45,13 @@ class Server(object):
             'state_dict': self.global_model.state_dict(),
             'perf': perf
         }, self.best_model, config.OUTPUT_DIR, filename='checkpoint.pth')
+
+        if self.conf.get('log_unseen_during_training', False) and getattr(config, 'UNSEEN_CLIENTS', None):
+            source_eval_clients = getattr(config, 'EVAL_CLIENTS', None)
+            config.EVAL_CLIENTS = config.UNSEEN_CLIENTS
+            target_split = self.conf.get('target_eval_split', 'test')
+            target_perf = inference(self.global_model, self.logger, config, target_split, self.device)
+            self.logger.info('unseen %s perf: %s', target_split, target_perf)
+            config.EVAL_CLIENTS = source_eval_clients
+
         self.epoch = self.epoch + 1
